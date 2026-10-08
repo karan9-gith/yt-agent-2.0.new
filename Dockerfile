@@ -1,16 +1,19 @@
-# ==============================================================================
-# ContentPilot AI — Production Backend Dockerfile
-# ==============================================================================
+# ContentPilot AI - Production Backend Dockerfile
+
+# =========================
+# Builder Stage
+# =========================
 FROM node:22-bookworm-slim AS builder
 
 WORKDIR /app
 
-# Install system build dependencies and native tools
+# Install system build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
     openssl \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy package manifests
@@ -20,22 +23,24 @@ COPY backend/package.json ./backend/
 # Install dependencies
 RUN npm ci
 
-# Copy backend source and prisma schema
+# Copy backend source
 COPY backend/ ./backend/
 
-# Generate Prisma Client & compile TypeScript
+# Generate Prisma Client & build TypeScript
 WORKDIR /app/backend
+
 RUN npx prisma generate
 RUN npm run build
 
-# ==============================================================================
+
+# =========================
 # Runner Stage
-# ==============================================================================
+# =========================
 FROM node:22-bookworm-slim AS runner
 
 WORKDIR /app
 
-# Install production runtime dependencies: FFmpeg, FFprobe, SQLite3, CA-certificates
+# Install production runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     sqlite3 \
@@ -50,18 +55,21 @@ ENV PORT=3001
 ENV STORAGE_DIR=/app/backend/storage
 ENV DATABASE_URL="file:/app/backend/prisma/production.db"
 
-# Copy package manifests and production dependencies
+# Copy package manifests
 COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/
 
+# Install production dependencies
 RUN npm ci --omit=dev
 
-# Copy generated Prisma engine and client
+# Copy Prisma generated client
 COPY --from=builder /app/backend/node_modules/.prisma ./backend/node_modules/.prisma
 COPY --from=builder /app/backend/node_modules/@prisma ./backend/node_modules/@prisma
 
-# Copy compiled JavaScript output and schema
+# Copy compiled JavaScript
 COPY --from=builder /app/backend/dist ./backend/dist
+
+# Copy Prisma schema/database files
 COPY --from=builder /app/backend/prisma ./backend/prisma
 
 # Create persistent storage directories
